@@ -1,0 +1,62 @@
+#Create Custom Repeat Library
+
+export PATH=/usr/local/RepeatModeler:$PATH
+BuildDatabase -name mim_repeat_lib_aug10 -engine ncbi M_aurantiacus_v1_single_ordered.fasta
+RepeatModeler -database mim_repeat_lib_aug10 -pa 18
+
+#Repeat Library: /home/afuiten/research/mimulus/august/RM_41342.FriAug121137132016/consensi.fa.classified
+
+#Repeat Analysis
+
+RepeatMasker -species "monkey flowers" -gff -pa 30 -a -xsmall M_aurantiacus_v1_splitline_ordered.fasta
+
+#Output files:
+M_aurantiacus_v1_splitline_ordered.fasta.masked     
+M_aurantiacus_v1_splitline_ordered.fasta.cat.gz  
+M_aurantiacus_v1_splitline_ordered.fasta.out.gff
+M_aurantiacus_v1_splitline_ordered.fasta.align  
+M_aurantiacus_v1_splitline_ordered.fasta.out     
+M_aurantiacus_v1_splitline_ordered.fasta.tbl
+
+RepeatMasker -lib /home/afuiten/research/mimulus/august/RM_41342.FriAug121137132016/consensi.fa.classified -gff -pa 30 -a -xsmall M_aurantiacus_v1_splitline_ordered.fasta.masked 
+
+#Output files:
+
+#Merge the *.out files from both runs:
+cat M_aurantiacus_v1_splitline_ordered.fasta.out M_aurantiacus_v1_splitline_ordered.fasta.masked.out >> M_aurantiacus_v1_splitline_ordered.fasta.merged.out
+M_aurantiacus_v1_splitline_ordered.fasta.merged.out
+
+#Use the *.masked from the final run:
+M_aurantiacus_v1_splitline_ordered.fasta.masked.masked
+
+#Use the *.tbl from the final run:
+M_aurantiacus_v1_splitline_ordered.fasta.masked.tbl
+
+##Email to Robert Hubley regarding properly running RepeatMasker with a custom Library
+
+Hi Dr. Hubley,
+
+I am running RepeatMasker on my de novo genome assembly for a dicot plant using a custom repeat library I generated with RepeatModeler.
+My commands are as follows:
+RepeatMasker -lib plant_custom_liibrary.fa.classified -gff -pa 30 -a -xsmall plant_genome.fasta
+When I open the .tbl summary file, I see that it reads "The query species was assumed to be homo ".
+When I tried to add the -species flag to my RepeatMasker command, it says that "You can choose only one species option (including -species and -lib) at a time."
+Is there a way to used both my custom repeat library and change the default species from Homo sapien?
+If you could answer this question, I will be really grateful. I tried searching for this online and in the RepeatMasker documentation and I couldn't find a clear answer to my question.
+
+Thank you,
+
+Allison
+
+##Response from Dr. Robert Hubley:
+
+The "-lib" option is not additive.  
+It does not first compare your sequence to the human library and then use the "-lib" library afterwards.  
+It does use TRF and some low_complexity sequences stored in RepeatMaskerLib.embl to screen out these regions but does not search for TEs.  
+You could achieve a similar result by first running RepeatMasker using the "-species" option on your sequence 
+then follow that with a run on the *.masked file using your sequence library to pick up the elements missed in the standard libraries.  
+You could then merge the *.out files from both runs and use the *.masked from the final run.
+
+Let me know if you have any further questions,
+
+-R

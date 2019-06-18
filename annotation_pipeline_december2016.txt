@@ -1,0 +1,355 @@
+#This is my pipeline for using MAKER2 for generating the whole genome annotation for the Mimulus aurantiacus genome. I based this pipeline on my previous pipeline I used for the Gulf pipefish genome annotation, with a few refinements and updates.
+#I used MAKER2; Holt & Yandell 2011. And I heavily utilized MAKER's wonderful Google Group resource while developing this pipeline.
+
+#Input Files
+
+#Genome: M_aurantiacus_v1_single_ordered.fasta
+
+#You only need ~10 Mb to train gene models. Pulled out Linkage Group 9 from genome: M_aurantiacus_v1_splitline_ordered_LG9.fasta 
+
+#Proteomes: Arabidopsis_thaliana.TAIR10.pep.all.fa, danshen.pep, Dcarota_388_v2.0.protein.fa, Mguttatus_256_v2.0.protein_1.fa, Oryza_sativa.IRGSP-1.0.pep.all.fa, Solanum_lycopersicum.SL2.50.pep.all.fa, Solanum_tuberosum.SolTub_3.0.pep.all.fa, Vvinifera_145_Genoscope.12X.protein.fa, uniprot_sprot.fasta
+
+#Create Custom Repeat Library
+
+export PATH=/usr/local/RepeatModeler:$PATH
+BuildDatabase -name mim_repeat_lib_aug10 -engine ncbi M_aurantiacus_v1_single_ordered.fasta
+RepeatModeler -database mim_repeat_lib_aug10 -pa 18
+
+#Repeat Library: /home/afuiten/research/mimulus/august/RM_41342.FriAug121137132016/consensi.fa.classified
+
+#Step 1, I ran MAKER to generate crude gene models to use to train my gene prediction program. For this step, I used transcript evidence and proteomes.
+ 
+#You can create a set of generic configuration files in the current working directory by typing the following.
+
+maker –CTL
+
+#This should create three file types, _exe.ctl, _boptl.ctl, and optl.ctl.
+ 
+#In this step, I need to run MAKER with…
+
+#    repeat masking
+#    transcript & protein evidence
+#    set est2genome=1, protein2genome=1
+
+#To accomplish this, I edit the maker_opts.ctl file…
+
+emacs Maker_opts.ctl
+
+    genome=M_aurantiacus_v1_splitline_ordered_LG9.fasta
+    organism_type=eukaryotic
+    protein=Arabidopsis_thaliana.TAIR10.pep.all.fa, danshen.pep, Dcarota_388_v2.0.protein.fa, Mguttatus_256_v2.0.protein_1.fa, Oryza_sativa.IRGSP-1.0.pep.all.fa, Solanum_lycopersicum.SL2.50.pep.all.fa, Solanum_tuberosum.SolTub_3.0.pep.all.fa, Vvinifera_145_Genoscope.12X.protein.fa, uniprot_sprot.fasta
+    protein2genome=1
+
+#Now I actually run MAKER:
+
+source ~maker/MAKER/setup.maker2
+export LD_PRELOAD=/usr/lib/libmpi.so
+mpiexec -n 10 maker -base mau_lg9_2 -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#Note, I used fix_nucleotides because the ALLPATHS genome fasta file contains letters other than AGTC
+#More important note, the mpiexec allows you to parallelize MAKER and it will therefore run much faster.
+
+#Conveniently, you can kill MAKER at anytime and rerun your original script and it will pick up where it left off.
+
+#Once it finishes, this is an example path to the output:/mau_lg9_2.maker.output/mau_lg9_2_datastore/C3/C0/LG9/LG9.gff
+
+#During this round, transcript alignments are promoted to gene models. The gff3_merge program is used to create a gff3 result file. Maker2zff is used to select a subset of gene models for training. Fathom and forge is used to format data for training SNAP. And hmm-assembler.pl is used to train the SNAP HMM v1.
+#To train SNAP, we need to convert the GFF3 gene models to ZFF format. To do this we need to collect all GFF3 files into a single directory:
+
+mkdir snap
+cd snap
+gff3_merge -d ../mau_lg9_2.maker.output/mau_lg9_2_master_datastore_index.log
+maker2zff -n mau_lg9_2.all.gff
+
+#Note, because we had no EST evidence, I needed to add the -n flag. Otherwise, the output files were empty. This is a tip I picked up from the MAKER google group from the developers. It prevents filtering and accepts all. 
+#There should now be two new files. The first is the ZFF format file and the second is a FASTA file the coordinates can be referenced against. These will be used to train SNAP.
+#	genome.ann
+#	genome.dna
+
+#The basic steps for training SNAP are first to filter the input gene models, then capture genomic sequence immediately surrounding each model locus, and finally uses those captured segments to produce the HMM.
+
+fathom -categorize 1000 genome.ann genome.dna
+fathom -export 1000 -plus uni.ann uni.dna
+forge export.ann export.dna
+hmm-assembler.pl mau . > ../mau_lg9_1.hmm
+
+#The final training parameters file is mau_lg9_1.hmm. We do not expect SNAP to perform that well with this training file because it is based on incomplete gene models; however, this file is a good starting point for further training.
+
+#Step 2, I ran MAKER a second time using the SNAP HMM v1 to make gene predictions. This better than using est2genome and protein2genome, but it’s still not great.
+#I needed to run MAKER with…
+
+#    repeat masking
+#    protein evidence
+#    set protein2genome=0
+#    supply the SNAP HMM v1
+
+#To accomplish this, I edit the maker_opts.ctl file…
+
+emacs maker_opts.ctl
+
+    snaphmm=mau_lg9_1.hmm
+    protein2genome=0
+
+#I ran MAKER again:
+
+mpiexec -n 10 maker -base mau_lg9_3 -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#Now I retrain SNAP, and run MAKER again.
+
+mkdir snap2
+cd snap2
+gff3_merge -d ../mau_lg9_3.maker.output/mau_lg9_3_master_datastore_index.log 
+maker2zff -n mau_lg9_3.all.gff 
+fathom -categorize 1000 genome.ann genome.dna
+fathom -export 1000 -plus uni.ann uni.dna
+forge export.ann export.dna
+hmm-assembler.pl mau . > ../mau_lg9_2.hmm
+
+#Step 3, I ran MAKER a third time using the SNAP HMM v2 to make gene predictions. This better than the SNAP HMM v1 predictions.
+#I needed to run MAKER with…
+
+#    repeat masking
+#    protein evidence
+#    set est2genome=0, protein2genome=0
+#    supply the SNAP HMM v2
+
+#To accomplish this, I edit the maker_opts.ctl file yet again…
+
+emacs maker_opts.ctl
+
+    snaphmm=mau_lg9_2.hmm
+    est2genome=0
+    protein2genome=0
+
+#And I ran MAKER again:
+
+mpiexec -n 10 maker -base mau_lg9_4 -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#I retrained SNAP and generated the HMM files needed in order to train Augustus.
+
+mkdir snap3
+cd snap3
+gff3_merge -d ../mau_lg9_4.maker.output/mau_lg9_4_master_datastore_index.log
+maker2zff -n mau_lg9_4.all.gff 
+fathom -categorize 1000 genome.ann genome.dna
+fathom -export 1000 -plus uni.ann uni.dna
+forge export.ann export.dna
+hmm-assembler.pl mau . > ../mau_lg9_3.hmm
+
+#Step 4, it is recommended that I now train Augustus. 
+#I am just using my training subset of the genome (linkage group 10) and not the whole genome. 
+
+#I need to change the format of the genome.ann file so Augustus accepts it.
+#This perl script is from https://github.com/sujaikumar/assemblage/blob/master/README-annotation.md, under “Convert MAKER2 GFF predictions into Augustus HMM.” 
+#Janna Fierst also used the same method to convert MAKER gff predictions into an Augustus-friendly HMM.
+
+zff2gff3.pl genome.ann | perl -plne ‘s/\t(\S+)$/\t\.\t$1/’ >genome.gff3
+
+#Finally, it’s time to run AUGUSTUS.
+#Augustus will write it's gene model into a directory under the config/species/ directory. 
+#Sometimes this is a problem because you, as a normal user, might not have authorization to write output files into this directory.
+#There are two options to work around this issue.
+#Option 1: You need to copy the Augustus config directory and all of its contents into your working directory & reroute the config path to this working directory by entering 
+
+export AUGUSTUS_CONFIG_PATH=/home/afuiten/research/mimulus/august/config
+ 
+#Option 2: Have the right privileges on the computer to write files into the config directory. I have this if I preface my commands with "sudo." 
+
+#For mimulus, I used option 2.
+
+#I ran the autoAug.pl script, which will “train AUGUSTUS and run AUGUSTUS completely and automatically” and was recommended by MAKER tutorials to use this autoAug.pl script. 
+#Janna Fierst also used the autoAug.pl script.
+
+#Because we had no transcriptomic data, Augustus was not able to generate a UTR model. 
+#Therefore, I copied over the tomato UTR model and used that. 
+
+cp tomato_utr_probs.pbl ../Mimulus_aurantiacus2
+
+sudo /opt/augustus-3.0.3/scripts/autoAug.pl -genome=M_aurantiacus_v1_splitline_ordered_LG9.fasta -species=Mimulus_aurantiacus2 -trainingset=snap3/genome.gff3  --workingdir=/home/afuiten/research/mimulus/august/autoAug3/
+/opt/augustus-3.0.3/scripts/autoAug.pl -genome=M_aurantiacus_v1_splitline_ordered_LG9.fasta -species=Mimulus_aurantiacus -trainingset=snap3/genome.gff3
+
+#NOTE!!! You must read the instructions on the screen for autoAug.pl and carry out the instructions. It does not completely finish on its own.
+#I didn't keep an exact record of all the commands I used to run Augustus
+
+#Step 5, I ran MAKER one final time using the SNAP HMM v3 and the Augustus HMM.
+
+#I needed to run MAKER with…
+
+#    repeat masking
+#    protein evidence
+#    set est2genome=0, protein2genome=0
+#    supply the SNAP HMM v3
+#	 supply the Augustus HMM
+#	 set keep_preds=1
+
+#To accomplish this, I edit the maker_opts.ctl file yet again…
+
+emacs maker_opts.ctl
+
+    snaphmm=mau_lg9_2.hmm
+    est2genome=0
+    protein2genome=0
+	augustus_species=Mimulus_aurantiacus3
+	keep_preds=0
+	genome=final.assembly.fasta
+	
+#And I ran MAKER again:
+
+mpiexec -n 10 maker -base mau_final_keep0 -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#And I ran MAKER again with the keep_preds=1
+
+mpiexec -n 10 maker -base mau_final_keep1 -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#The keep_preds flag tells MAKER whether or not to keep unsupported gene predictions in the final dataset. 
+#Sounds like a good idea to keep it on (1), but a MAKER google group post states “don’t use keep_preds on any of your steps. That should really only be used for Fungi, Oomycetes, or some insect species.” 
+#So, I’ve ran the final annotations both ways, with keep_preds=1 and keep_preds=0.
+#At this point, the best SNAP or Augustus predictions are promoted to gene models based on AED scores and based on length when AED score=1. 
+#You will use gff3_merge and fasta_merge to generate the gff3 results file and transcript and proteins fasta files.
+
+#In order to collate the gff and fasta output, I ran the following commands:
+
+gff3_merge -d ../mau_final_keep1.maker.output/mau_final_keep1_master_datastore_index.log
+gff3_merge -d ../mau_final_keep0.maker.output/mau_final_keep0_master_datastore_index.log
+
+fasta_merge -d ../mau_final_keep1.maker.output/mau_final_keep1_master_datastore_index.log 
+fasta_merge -d ../mau_final_keep0.maker.output/mau_final_keep0_master_datastore_index.log 
+
+#This produces the following files:
+
+seq_name.gff – a gff file that can be loaded into GMOD, GBROWSE, or Apollo. these are the final filtered and modified protein models (this is what you want)
+seq_name.maker.transcripts.fasta – a fasta file of the MAKER annotated transcript sequences
+seq_name.maker.proteins.fasta – a fasta file of the MAKER annotated protein sequences
+seq_name.maker.XXX.transcript.fasta – a fasta file of ab-initio predicted transcript sequences from program XXX
+seq_name.maker.XXX.proteins.fasta – a fasta file of ab-inito predicted protein sequences from program XXX. these are the raw unfiltered snap ab initio predictions (for reference purposes)
+seq_name.maker.non_overlapping_ab_initio.transcripts.fasta – a fasta file of filtered ab-inito transcript sequences that don’t overlap maker annotations
+seq_name.maker.non_overlapping_ab_initio.proteins.fasta – a fasta file of filtered ab-inito protein sequences that don’t overlap maker annotations. these are non-redundant rejected models that do not overlap the maker.proteins.fasta entries. If you think you are missing a gene, look for it here.  Sometimes people use interproscan (very slow) to analyze this file for false negatives.
+
+#These files are also described in the README distributed with MAKER in the “MAKER OUTPUT” section.
+
+#(2) The annotation that includes only evidence-based gene annotations: /home3/afuiten/mimulus/genome_annotations/final_keep0/
+
+mau_final_keep0.all.gff – a gff file that can be loaded into GMOD, GBROWSE, or Apollo. these are the final filtered and modified protein models (this is what you want)
+mau_final_keep0.all.maker.proteins.fasta – a fasta file of the MAKER annotated protein sequences                              
+mau_final_keep0.all.maker.transcripts.fasta – a fasta file of the MAKER annotated transcript sequences
+mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta – a fasta file of ab-inito predicted protein sequences that do not overlap with the evidence-based gene models
+mau_final_keep0.all.maker.non_overlapping_ab_initio.transcripts.fasta – a fasta file of ab-inito predicted transcripts sequences that do not overlap with the evidence-based gene models
+mau_final_keep0.all.maker.augustus_masked.proteins.fasta – a fasta file of ab-inito predicted protein sequences from program Augustus. these are the raw unfiltered snap ab initio predictions (for reference purposes)    
+mau_final_keep0.all.maker.augustus_masked.transcripts.fasta – a fasta file of ab-initio predicted transcript sequences from program Augustus
+mau_final_keep0.all.maker.snap_masked.proteins.fasta – a fasta file of ab-inito predicted protein sequences from program SNAP. these are the raw unfiltered snap ab initio predictions (for reference purposes)
+mau_final_keep0.all.maker.snap_masked.transcripts.fasta – a fasta file of ab-initio predicted transcript sequences from program SNAP
+
+
+#InterProScan
+#Next I used InterProScan to evaluate the rejected models in the non-overlapping.abinit.proteins.fasta file, 
+#The goal is to grep the ones that have an IPR domain out of the GFF3 (will be match/match_part features) and then pass them to pred_gff in a separate run (just updates the format to gene/mRNA/exon/CDSwith proper reading frame). 
+#You can then merge the resulting GFF3's and fasta files.
+
+#Because InterProscan can take awhile to run, I decided to divide the non_overlapping_ab_initio.proteins.fasta into 14 smaller files
+head -n 4132 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta > temp1.proteins.fasta
+head -n 8495 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4363 > temp2.proteins.fasta
+head -n 12872 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4377 > temp3.proteins.fasta
+head -n 17175 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4303 > temp4.proteins.fasta
+head -n 21400 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4225 > temp5.proteins.fasta
+head -n 26035 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4635 > temp6.proteins.fasta
+head -n 30450 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4415 > temp7.proteins.fasta
+head -n 34760 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4310 > temp8.proteins.fasta
+head -n 39163 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4403 > temp9.proteins.fasta
+head -n 43272 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4109 > temp10.proteins.fasta
+head -n 47904 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4632 > temp11.proteins.fasta
+head -n 52144 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4240 > temp12.proteins.fasta
+head -n 56538 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 4394 > temp13.proteins.fasta
+head -n 59816 mau_final_keep0.all.maker.non_overlapping_ab_initio.proteins.fasta | tail -n 3278 > temp14.proteins.fasta
+
+#Therefore, I launched 14 separate InterProscan jobs simultaneously instead of one single large job
+#I wrote a script to run InterProScan on Aciss called interproscan_script.sh. 
+#Again, InterProScan will evaluate the rejected models in the non-overlapping.abinit.proteins.fasta file
+
+######
+#!/bin/bash                                                                                                                                                                                                                  
+
+#PBS -q longgen                                                                                                                                                                                                              
+#PBS -l nodes=1:ppn=12                                                                                                                                                                                                       
+#PBS -o /home3/afuiten/mimulus/genome_annotations/IPRscan2                                                                                                                                                                   
+#PBS -e /home3/afuiten/mimulus/genome_annotations/IPRscan2                                                                                                                                                                   
+#PBS -d /home3/afuiten/mimulus/genome_annotations/IPRscan2
+
+module load interproscan/5.7-48.0
+src=/home3/afuiten/mimulus/genome_annotations/IPRscan2
+
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp1.proteins.fasta -f tsv -o $src/IPRS_1_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp2.proteins.fasta -f tsv -o $src/IPRS_2_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp3.proteins.fasta -f tsv -o $src/IPRS_3_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp4.proteins.fasta -f tsv -o $src/IPRS_4_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp5.proteins.fasta -f tsv -o $src/IPRS_5_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp6.proteins.fasta -f tsv -o $src/IPRS_6_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp7.proteins.fasta -f tsv -o $src/IPRS_7_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp8.proteins.fasta -f tsv -o $src/IPRS_8_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp9.proteins.fasta -f tsv -o $src/IPRS_9_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp10.proteins.fasta -f tsv -o $src/IPRS_10_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp11.proteins.fasta -f tsv -o $src/IPRS_11_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp12.proteins.fasta -f tsv -o $src/IPRS_12_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp13.proteins.fasta -f tsv -o $src/IPRS_13_OUT.txt
+interproscan.sh -iprlookup -goterms -pa -T $src/temp1 -i $src/temp14.proteins.fasta -f tsv -o $src/IPRS_14_OUT.txt
+
+######
+
+#Next, I isolated the first column of the output files from InterProScan and made a list of the non_overlapping_ab_initio.proteins.fasta entries that had protein domain hits based off of InterProScan.
+cut -f 1 IPRS_1_OUT.txt IPRS_2_OUT.txt IPRS_3_OUT.txt IPRS_4_OUT.txt IPRS_5_OUT.txt IPRS_6_OUT.txt IPRS_7_OUT.txt IPRS_8_OUT.txt IPRS_9_OUT.txt IPRS_10_OUT.txt IPRS_11_OUT.txt IPRS_12_OUT.txt IPRS_13_OUT.txt IPRS_14_OUT.txt| sed -E -e 's/^(.*)(-processed)(.*)$/\1\-abinit\3/' > list_1_14
+
+#Then I grepped out these non_overlapping_ab_initio gene models from the mau_final_keep0.all.gff. 
+#This means I am grepping the ones that have an IPR domain out of the GFF3.
+#They were designated as match and match_part features in this gff file.
+
+grep -f list_1_14 mau_final_keep0.all.gff > interproscan_keepers_all.gff
+
+#Next I passed them to pred_gff in a separate run (this just updates the format to gene/mRNA/exon/CDSwith proper reading frame). 
+#To accomplish this, I edit the maker_opts.ctl file…
+
+emacs Maker_opts.ctl
+
+    genome=M_aurantiacus_v1_splitline_ordered.fasta
+    organism_type=eukaryotic
+    pred_gff=interproscan_keepers_all.gff
+
+#And I ran MAKER again:
+
+mpiexec -n 25 maker -base mau_interproscan -fix_nucleotides maker_opts.ctl maker_bopts.ctl maker_exe.ctl
+
+#In order to collate the gff and fasta output, I ran the following commands:
+
+gff3_merge -d ../mau_interproscan.maker.output/mau_interproscan_master_datastore_index.log 
+fasta_merge -d ../mau_interproscan.maker.output/mau_interproscan_master_datastore_index.log 
+
+#This produces the following files:
+
+mau_interproscan.all.gff                                                 
+mau_interproscan.all.maker.pred_gff%3Asnap_masked.proteins.fasta     
+mau_interproscan.all.maker.transcripts.fasta
+mau_interproscan.all.maker.pred_gff%3Aaugustus_masked.proteins.fasta     
+mau_interproscan.all.maker.pred_gff%3Asnap_masked.transcripts.fasta
+mau_interproscan.all.maker.pred_gff%3Aaugustus_masked.transcripts.fasta  
+mau_interproscan.all.maker.proteins.fasta
+
+#You can then merge the resulting GFF3's and fasta files.
+
+cat ../final_keep0/mau_final_keep0.all.gff ../interproscan_output/mau_interproscan.all.gff > final_merged_annotations.all.gff
+cat ../final_keep0/mau_final_keep0.all.maker.proteins.fasta ../interproscan_output/mau_interproscan.all.maker.proteins.fasta > final_merged_annotations.all.maker.proteins.fasta
+cat ../final_keep0/mau_final_keep0.all.maker.augustus_masked.proteins.fasta ../interproscan_output/mau_interproscan.all.maker.pred_gff%3Aaugustus_masked.proteins.fasta  > final_merged_annotations.all.maker.augustus_masked.proteins.fasta
+cat ../final_keep0/mau_final_keep0.all.maker.snap_masked.proteins.fasta ../interproscan_output/mau_interproscan.all.maker.pred_gff%3Asnap_masked.proteins.fasta > final_merged_annotations.all.maker.snap_masked.proteins.fasta
+cat ../final_keep0/mau_final_keep0.all.maker.augustus_masked.transcripts.fasta ../interproscan_output/mau_interproscan.all.maker.pred_gff%3Aaugustus_masked.transcripts.fasta > final_merged_annotations.all.maker.augustus_masked.transcripts.fasta
+cat ../final_keep0/mau_final_keep0.all.maker.snap_masked.transcripts.fasta	../interproscan_output/mau_interproscan.all.maker.pred_gff%3Asnap_masked.transcripts.fasta > final_merged_annotations.all.maker.snap_masked.transcripts.fasta
+cat ../final_keep0/mau_final_keep0.all.maker.transcripts.fasta ../interproscan_output/mau_interproscan.all.maker.transcripts.fasta > final_merged_annotations.all.maker.transcripts.fasta
+
+#This produces the following files:
+
+final_merged_annotations.all.gff                                      
+final_merged_annotations.all.maker.proteins.fasta                 
+final_merged_annotations.all.maker.transcripts.fasta
+final_merged_annotations.all.maker.augustus_masked.proteins.fasta     
+final_merged_annotations.all.maker.augustus_masked.transcripts.fasta  
+final_merged_annotations.all.maker.snap_masked.proteins.fasta
+final_merged_annotations.all.maker.snap_masked.transcripts.fasta
+
+#These files are also described in the README distributed with MAKER in the “MAKER OUTPUT” section.
+#The annotations that includes the final gene annotations (evidence-based gene models and non-overlapping ab initio gene models with IPR domains) can be found here: /home3/afuiten/mimulus/genome_annotations/final_annotation/
