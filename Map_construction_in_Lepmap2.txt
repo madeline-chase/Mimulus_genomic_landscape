@@ -1,0 +1,32 @@
+#######################Commands for running Lepmap_2########################
+
+### 1) Convert data file to Lepmap2 input. The loc2linkage program, provided with Lepmap2, converts joinmap forma (.loc) format to Lepmap2 format (.linkage)
+
+	./loc2linkage /home6/sstankow/lepmap_2/batch_1.genotypes_250.loc >r250_m12
+
+
+### 2) Filter data. This command removes individuals with based on the level of missing data (missingLimitIndividual) and markers based on evidence for segregation distortion (dataTolerance). 
+
+	java -cp bin/ Filtering data=r250_m12.linkage missingLimitIndividual=1200 dataTolerance=0.01 > r250_m12.linkage
+
+
+### 3) seperate chromosomes. This script separates in markers into chromosomes based on a user-defined lodLimit
+
+	java -cp bin/ SeparateChromosomes data=r250_m12.linkage lodLimit=20 >map1.txt
+
+### 4) join singles. This command assigns additional markers to existing LGs using a user defined lod limit. 
+
+java -cp bin/ JoinSingles map1.txt data=r250_m12.linkage lodLimit=4 >map1_js.txt
+
+
+### 5) Find some initial orders: This command returns an initial sex-averaged (sexAveraged=1) marker order determine using the kosambi mapping function (useKosambi=1) which can be used a starting point for order refinement. Ten independent runs like this were conducted for each LG (chromosome=n) and the most likely one retained for subsequent ordering steps.
+
+	java -cp ~/lepmap_2/bin/ OrderMarkers map=~/lepmap_2/map1_js.txt data=~/lepmap_2/r250_m12families.linkage chromosome=1 sexAveraged=1 useKosambi=1 numThreads=32 >~/lepmap_2/order_LG1families_js_sexav_1.txt
+
+### 6) Evaluate and improve the map order. This command takes the best order and attempts to improve it. 
+
+	java -cp ~/lepmap_2/bin/ OrderMarkers evaluateOrder=~/lepmap_2/order_LG1families_js_sexav_1.txt data=~/lepmap_2/r250_m12_15percmissing_segdist001_7families.linkage sexAveraged=1 filterWindow=10 polishWindow=100 improveOrder=1 useKosambi=1 chromosome=1 numThreads=7 >~/lepmap_2/LG1_out.txt
+	
+### 7) estimate the map from a fixed order after making some manual corrections based on the local physical order within contigs. This function re-estimates the map with those corrections without making improvements ot the order (improveOrder=0). 
+
+java -cp ~/lepmap_2/bin/ OrderMarkers evaluateOrder=~/lepmap_2/corrected_orderLG1.txt data=~/lepmap_2/r250_m12_15percmissing_segdist001_7families.linkage sexAveraged=1 improveOrder=0 useKosambi=1 chromosome=1 numThreads=7 >~/lepmap_2/LG1_corrected_out.txt

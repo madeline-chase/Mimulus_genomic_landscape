@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH --partition=short        ### Partition (like a queue in PBS)
+#SBATCH --job-name=phase_genome_G1      ### Job Name
+#SBATCH --output=phase_genome_G1.out         ### File in which to store job output
+#SBATCH --error=phase_genome_G1.err          ### File in which to store job error messages
+#SBATCH --time=0-24:00:00       ### Wall clock time limit in Days-HH:MM:SS
+#SBATCH --nodes=1               ### Node count required for the job
+#SBATCH -n15
+
+# This command was ran to phase SNPs for input to MVFtools
+
+module load easybuild
+module load Java/1.8.0_131
+
+java -Xss5m -Xmx8g -jar /projects/streisfeld/mchase2/genome_reseq/scripts/beagle.08Jun17.d8b.jar gt=/projects/streisfeld/mchase2/genome_reseq/genomeV1/var_calls/genome_V1/pairwise_comps/all_9_taxa_G1_vars.vcf map=/projects/streisfeld/mchase2/genome_reseq/genomeV2/phasing/post_chrom_map.map.txt nthreads=15 window=100000 overlap=10000 impute=false out=/projects/streisfeld/mchase2/genome_reseq/genomeV1/var_calls/genome_V1/phasing/phased_snps_WG_G1.vcf

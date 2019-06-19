@@ -1,0 +1,14 @@
+#!/bin/bash
+#SBATCH --partition=longfat        ### Partition (like a queue in PBS)
+#SBATCH --job-name=WG_tree_G1_9_taxa      ### Job Name
+#SBATCH --output=WG_tree_G1_9_taxa.out         ### File in which to store job output
+#SBATCH --error=WG_tree_G1_9_taxa.err          ### File in which to store job error messages
+#SBATCH --time=4-00:00:00       ### Wall clock time limit in Days-HH:MM:SS
+#SBATCH --nodes=1               ### Node count required for the job
+#SBATCH -n10     ### Number of tasks to be launched per Node
+
+# This command was used to run raxml and obtain the whole genome phylogeny
+
+cd /projects/streisfeld/mchase2/standard-RAxML-master/
+
+./raxmlHPC-PTHREADS-SSE3 -T 10 -m GTRGAMMA -p 1689131 -s /projects/streisfeld/mchase2/genome_reseq/genomeV1/var_calls/genome_V1/pairwise_comps/all_9_taxa_G1_vars.phylip.phy -w /projects/streisfeld/mchase2/genome_reseq/genomeV1/corr_landscape/trees/ -n WG_tree_G1_9_taxa

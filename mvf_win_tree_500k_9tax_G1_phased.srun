@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH --partition=long        ### Partition (like a queue in PBS)
+#SBATCH --job-name=mvf_win_tree_500k_8tax_phased      ### Job Name
+#SBATCH --output=mvf_win_tree_500k_8tax_phased.out         ### File in which to store job output
+#SBATCH --error=mvf_win_tree_500k_8tax_phased.err          ### File in which to store job error messages
+#SBATCH --time=10-00:00:00       ### Wall clock time limit in Days-HH:MM:SS
+#SBATCH --nodes=1               ### Node count required for the job
+#SBATCH -n16
+
+# This command was used to run MVFtools in 500kb windows
+
+module load Biopython
+module load Python/3.6.1
+
+python3 /projects/streisfeld/mchase2/genome_reseq/scripts/mvftools-master/mvf_window_tree.py --mvf /projects/streisfeld/mchase2/genome_reseq/genomeV1/var_calls/genome_V1/phasing/phased_snps_WG_G1.mvf --out /projects/streisfeld/mchase2/genome_reseq/genomeV1/corr_landscape/trees/window_trees/mvf_win_tree_phased_G1_500k_9taxa.txt --rootwith CLV4 CLV11 CLV_GH --raxml_outgroups CLV4 CLV11 CLV_GH --windowsize 500000 --minsites 100 --raxmlpath /projects/streisfeld/mchase2/standard-RAxML-master/raxmlHPC-SSE3 --samples ELF11 JMC19 LH19-2 MT10 UCSD13 CLV_GH CLV11 CLV4 159357_83 159357_84 195935_1 T84_79 AUR_T102_3 AUR_T104_9 AUR_T50_2 AUR_T92_6 BIF_T101_10 BIF_T61_9 BIF_T96_2 BIF_T99_1 CAL_T144_3 CAL_T150_10 CAL_T90_2 CAL_T91_7 FLE_KK168 KK161 KK180 KK182 LON_DPR_Y3 LON_SS_Y16 LON_T33_1 LON_T8_8 BCRD11 INJ10 PCT7 POTR15 LO4
+

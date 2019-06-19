@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH --partition=short        ### Partition (like a queue in PBS)
+#SBATCH --job-name=pun_v_all_pop_gen      ### Job Name
+#SBATCH --output=pun_v_all_pop_gen.out         ### File in which to store job output
+#SBATCH --error=pun_v_all_pop_gen.err          ### File in which to store job error messages
+#SBATCH --time=0-24:00:00       ### Wall clock time limit in Days-HH:MM:SS
+#SBATCH --nodes=1               ### Node count required for the job
+#SBATCH -n 1     ### Number of tasks to be launched per Node
+
+## The command below demonstrates how population genomic window statistics were calculated
+
+module load Python/2.7.13
+
+python2 /projects/streisfeld/mchase2/genome_reseq/genomeV2/genomics_general-master/popgenWindows.py -g /projects/streisfeld/mchase2/genome_reseq/genomeV1/var_calls/genome_V1/pairwise_comps/geno_format/pun_aus_G1_vars_geno_filt3.txt -f phased --windType predefined --windCoords /projects/streisfeld/mchase2/genome_reseq/genomeV1/corr_landscape/pop_gen_windows/500kb_win_coord_sequential.txt -m 500 --writeFailedWindows -p PUN ELF11,JMC19,LH19-2,MT10,UCSD13 -p AUS BCRD11,INJ10,PCT7,POTR15,LO4 -o /projects/streisfeld/mchase2/genome_reseq/genomeV1/corr_landscape/pop_gen_windows/pun_aus_pop_gen_G1_w500k_nolap_m500.txt
+
+
+
+
+
+
+
+
